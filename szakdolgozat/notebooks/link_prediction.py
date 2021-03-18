@@ -178,38 +178,40 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None):
 
     return rmse
 
-def draw_plots(G):
+def draw_plots(G, process_number = 4):
     alpha_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     p_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     rmse = {
-        0.1: [],
-        0.2: [],
-        0.3: [],
-        0.4: [],
-        0.5: [],
-        0.6: [],
-        0.7: [],
-        0.8: [],
-        0.9: [],
+        0.1: {},
+        0.2: {},
+        0.3: {},
+        0.4: {},
+        0.5: {},
+        0.6: {},
+        0.7: {},
+        0.8: {},
+        0.9: {},
     }
     with multiprocessing.Manager() as manager: # start parralell processes
         L = manager.list() # list to save the Process results
         processes = []
+        pool = multiprocessing.Pool(processes=process_number)
         for alpha_value in alpha_v:
             for p_value in p_v:
-                p = multiprocessing.Process(target=lp_constant_p, args=(G,p_value,alpha_value, L))
-                p.start() # start each process
-                processes.append(p)
+                result = pool.apply_async(lp_constant_p, [G,p_value,alpha_value, L])
+                # p.start() # start each process
+                # processes.append(p)
+                print(result)
+        pool.close()
+        pool.join()
         for p in processes:
-            p.join() #wait for all process to be terminated
+            p.join()  # wait for all process to be terminated
         print(L)
         for i in L:
             tmp = i
             print(tmp)
-            rmse[tmp['alpha']].append(tmp['rmse'])
+            rmse[tmp['alpha']][tmp['p']] = tmp['rmse'][0]
         print(rmse)
-        for i in rmse:
-            rmse[i].sort()
         
         return rmse
 

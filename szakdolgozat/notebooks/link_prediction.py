@@ -11,6 +11,7 @@ import concurrent.futures
 import queue
 import time
 from multiprocessing.managers import SharedMemoryManager
+import json
 
 
 def calculate_error(deleted_edges, Type):
@@ -214,4 +215,53 @@ def draw_plots(G, process_number = 4):
         print(rmse)
         
         return rmse
+
+
+def plotting(file):
+    results_strkeys = None
+    with open(file, 'r') as fp:
+        results_strkeys = json.loads(fp.read())
+    results = {
+        0.1: {},
+        0.2: {},
+        0.3: {},
+        0.4: {},
+        0.5: {},
+        0.6: {},
+        0.7: {},
+        0.8: {},
+        0.9: {}
+    }
+
+    alpha_plot_index = {
+        0.1: [0, 0],
+        0.2: [0, 1],
+        0.3: [0, 2],
+        0.4: [1, 0],
+        0.5: [1, 1],
+        0.6: [1, 2],
+        0.7: [2, 0],
+        0.8: [2, 1],
+        0.9: [2, 2]
+    }
+
+    alpha_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    p_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    fig, axs = plt.subplots(3, 3, sharex=True, sharey=True )
+    #fig = plt.figure()
+    #gs = fig.add_gridspec(3, 3, hspace=5)
+    #axs = gs.subplots(sharex=True, sharey=True)
+
+    for alpha in alpha_v:
+        for p in p_v:
+            results[alpha][p] = results_strkeys[str(alpha)][str(p)]
+        print("Alpha value: {}".format(alpha))
+
+        firstIndex = alpha_plot_index[alpha][0]
+        secondIndex = alpha_plot_index[alpha][1]
+        print("row: {} column: {}".format(firstIndex, secondIndex))
+
+        axs[firstIndex, secondIndex].plot(p_v, list(results[alpha].values()))
+        #axs[firstIndex, secondIndex].set_title(f"Alpha value: {alpha}")
+
 

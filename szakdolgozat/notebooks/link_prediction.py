@@ -12,16 +12,74 @@ import queue
 import time
 from multiprocessing.managers import SharedMemoryManager
 import json
+import missing_link_prediction as mlp
 
 
-def calculate_error(deleted_edges, Type):
+def calculate_AUC(deleted_edges, non_existent_edges):
+    N = 25
+    deleted_list = []
+    non_existent_list = []
+    for i in range(N):
+        deleted_list.append(random.choice(deleted_edges))
+        non_existent_list.append(random.choice(non_existent_edges))
+
+    n1 = 0
+    n2 = 0
+    for i in range(len(deleted_list)):
+        if deleted_list[i][3] > non_existent_list[i][3]:
+            n1 = n1+1
+        elif deleted_list[i][3] == non_existent_list[i][3]:
+            n2 = n2 + 1
+
+    return (n1 + 0.5*n2)/N
+
+
+def pearson_correlation(deleted_edges, treshold, resultType):
+    if resultType == "Similarity":
+        list1 = []
+        for edge in deleted_edges:
+            edge1 = list(edge)
+            if edge1[3] > treshold:
+                edge1[3] = 1
+                list1.append(tuple(edge1))
+            else:
+                edge1[3] = 0
+                list1.append(tuple(edge1))
+        deleted_edges = list1
+
+    element_3 = []
+    element_4 = []
+    for edge in deleted_edges:
+        element_3.append(edge[2])
+        element_4.append(edge[3])
+
+    print("element3: ", np.array(element_3))
+    print("element4: ", np.array(element_4))
+    print("pearson:", np.corrcoef(np.array(element_3), np.array(element_4)))
+    return np.corrcoef(np.array(element_3), np.array(element_4))[0][1]
+
+
+def calculate_error(deleted_edges, resultType, treshold, Type="RMSE"):
     if Type == "RMSE":
+        if resultType == "Similarity":
+            list1 = []
+            for edge in deleted_edges:
+                edge1 = list(edge)
+                if edge1[3] > treshold:
+                    edge1[3] = 1
+                    list1.append(tuple(edge1))
+                else:
+                    edge1[3] = 0
+                    list1.append(tuple(edge1))
+            deleted_edges = list1
+
         old_w = []
         predicted_w = []
 
         for edge in deleted_edges:
-            old_w.append(edge[2])
-            predicted_w.append(edge[3])
+            if not math.isnan(edge[3]):
+                old_w.append(edge[2])
+                predicted_w.append(edge[3])
 
         return RMSE(old_w, predicted_w)
     else:
@@ -120,7 +178,33 @@ def lp(G, alpha=None):
 que = []
 
 
-def lp_constant_p( G, p=0.1, alpha=None, L = None):
+def fairness_goodness_convex( a1, a2, alpha):
+    return alpha * a1 +(1-alpha) * a2
+
+
+def fairness_goodness_non_convex( a1, a2, alpha):
+    return (np.sign(a1) * abs(a1 ** alpha)) * \
+           (np.sign(a2) * abs(a2 ** (1 - alpha)))
+
+
+def belso_szorzat( a1, a2, alpha):
+    return np.array(a1)**alpha @ (np.array(a2)**(1-alpha)).T
+
+
+def attribute_approx(G, alpha=0.5, v1_method=nx.degree_centrality, v2_method=nx.closeness_centrality,
+                     attributum_method=nx.diameter, L=[] ):
+    v1 = list(v1_method(G).values())
+    v2 = list(v2_method(G).values())
+    attributum = attributum_method(G)
+
+    print(v1)
+    print(v2)
+
+    print(math.sqrt((belso_szorzat(v1,v2,alpha) - attributum) ** 2))
+
+
+
+def lp_constant_p( G, p=0.1, alpha=None, L = None, type=fg.compute_fairness_goodness, convex=False):
     """G: graph
        p: percentage of the edges to be deleted in every iteration exp.: 0.1 = 10%
     """
@@ -137,47 +221,85 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None):
         'alpha': alpha
     }
     XPERCENT = math.floor(G.size() * p)  # p percent of the edges
-    Available_edges = list(G.edges.data('weight', default=0))  # get all edges with weights
+    Available_edges = list(G.edges.data('weight', default=1))# get all edges with weights
     Deleted_edges = []  # deleted edges
 
     rmse = []
 
     temp_rmse = []
+    non_existent_edges_list = []
+    updated_deleted_edges_list = []
     for i in range(25):
         G2 = G.copy()
         updated_deleted_edges = []
+        non_existent_edges = []
 
-        Deleted_edges = random.sample(Available_edges, k=int(p * G2.number_of_edges()))  # saving the random edges
+        Deleted_edges = random.sample(Available_edges, k=int(p * G2.number_of_edges()))# saving the random edges
+
+        non_existing_edges = None
+        if not type == fg.compute_fairness_goodness:
+            non_existing_edges = list(nx.complement(G2).edges.data('weight', default=0))
+
         G2.remove_edges_from(Deleted_edges)  # delete the edges
+        # Innen jön a specifikus rész
+        v1, v2 = type(G2,Deleted_edges, non_existing_edges)
 
-        fairness, goodness = fg.compute_fairness_goodness(G2)
-        if alpha is None:  # If this method called without alpha param.
-            for edge in Deleted_edges:  # all deleted edges for fairness goodness
+        #nx.draw_circular(G2)
+        #plt.show()
+
+        print(v1, v2)
+        for edge in Deleted_edges:  # all deleted edges for fairness goodness
+            _from = edge[0]
+            _to = edge[1]
+            # edge = (*edge, ((np.sign(fairness[_from])*(abs(fairness[_from])**alpha))*(np.sign(goodness[_to])*(abs(goodness[_to])**(1-alpha))))) # (from, to, old_weight, new_weight)
+            if not convex:
+                if type == fg.compute_fairness_goodness:
+                    edge = (*edge, (fairness_goodness_non_convex(a1=v1[_from], a2=v2[_to], alpha=alpha)))  # (from, to, old_weight, new_weight
+                    updated_deleted_edges.append(edge)
+                else:
+                    print(v1)
+                    print(v2)
+                    edge = (*edge, (fairness_goodness_non_convex(a1=v1[_from, _to], a2=v2[_from, _to], alpha=alpha)))  # (from, to, old_weight, new_weight
+                    updated_deleted_edges.append(edge)
+                    print("updated deleted edges:", updated_deleted_edges)
+
+            else:
+                if type == fg.compute_fairness_goodness:
+                    edge = (*edge, (fairness_goodness_convex(a1=v1[_from], a2=v2[_to], alpha=alpha)))  # (from, to, old_weight, new_weight
+                    updated_deleted_edges.append(edge)
+                else:
+                    edge = (*edge,(alpha * v1[_from] + (1-alpha) * v2[_to]))
+                    updated_deleted_edges.append(edge)
+
+        if not type == fg.compute_fairness_goodness:
+            for edge in non_existing_edges:  # all deleted edges for fairness goodness
                 _from = edge[0]
                 _to = edge[1]
-                edge = (*edge, (fairness[_from] * goodness[_to]))  # (from, to, old_weight, new_weight)
-                updated_deleted_edges.append(edge)
+            # edge = (*edge, ((np.sign(fairness[_from])*(abs(fairness[_from])**alpha))*(np.sign(goodness[_to])*(abs(goodness[_to])**(1-alpha))))) # (from, to, old_weight, new_weight)
+                if not convex:
+                    print(v1)
+                    print(v2)
+                    edge = (*edge, (fairness_goodness_non_convex(a1=v1[_from, _to], a2=v2[_from, _to], alpha=alpha)))  # (from, to, old_weight, new_weight
+                    non_existent_edges.append(edge)
+                    print("updated deleted edges:", updated_deleted_edges)
 
-        else:  # If this method called with alpha param.
-            for edge in Deleted_edges:  # all deleted edges for fairness goodness
-                _from = edge[0]
-                _to = edge[1]
-                # edge = (*edge, ((np.sign(fairness[_from])*(abs(fairness[_from])**alpha))*(np.sign(goodness[_to])*(abs(goodness[_to])**(1-alpha))))) # (from, to, old_weight, new_weight)
-                edge = (*edge, ((np.sign(fairness[_from]) * abs(fairness[_from] ** alpha)) * (
-                            np.sign(goodness[_to]) * abs(
-                        goodness[_to] ** (1 - alpha)))))  # (from, to, old_weight, new_weight
-                updated_deleted_edges.append(edge)
+                else:
+                    edge = (*edge,(alpha * v1[_from] + (1-alpha) * v2[_to]))
+                    non_existent_edges.append(edge)
 
-        temp_rmse.append(calculate_error(updated_deleted_edges, "RMSE"))
-    rmse.append(avg(temp_rmse))
 
-    result['rmse'] = rmse
+        updated_deleted_edges_list.append(updated_deleted_edges)
+        non_existent_edges_list.append(non_existent_edges)
+        #temp_rmse.append(calculate_error(updated_deleted_edges, "RMSE"))
+    #rmse.append(avg(temp_rmse))
+
+    """result['rmse'] = rmse
     if L is not None:
         L.append(result)
 
-    print(rmse)
+    print(rmse)"""
 
-    return rmse
+    return updated_deleted_edges_list, non_existent_edges_list
 
 def draw_plots(G, process_number = 4):
     alpha_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -199,7 +321,7 @@ def draw_plots(G, process_number = 4):
         pool = multiprocessing.Pool(processes=process_number)
         for alpha_value in alpha_v:
             for p_value in p_v:
-                result = pool.apply_async(lp_constant_p, [G,p_value,alpha_value, L])
+                result = pool.apply_async(lp_constant_p, [G,p_value,alpha_value, L, mlp.missing_link_algorithm])
                 # p.start() # start each process
                 # processes.append(p)
                 print(result)

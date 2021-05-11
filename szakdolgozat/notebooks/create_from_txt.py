@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 
 def from_txt(url):
     G = nx.Graph()
-    data = pd.read_csv(url, sep=" ", header=None)
-    data.columns = ["from", "to"]
+    data = pd.read_csv(url, sep=",", header=None)
+    data.columns = ["from", "to", "rating"]
     for index, row in data.iterrows():
         G.add_node(row['from'].item())
 

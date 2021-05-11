@@ -24,7 +24,7 @@ def initiliaze_scores(G):
             goodness[node] = 0
     return fairness, goodness
 
-def compute_fairness_goodness(G):
+def compute_fairness_goodness(G,deleted_edges,non_existing_edges):
     fairness, goodness = initiliaze_scores(G)
     
     nodes = G.nodes()

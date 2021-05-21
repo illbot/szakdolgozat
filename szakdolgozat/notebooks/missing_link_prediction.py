@@ -20,10 +20,10 @@ def missing_link_algorithm(G, deleted_edges, non_existing_edges):
     m1 = np.zeros((G.number_of_nodes(), G.number_of_nodes()))
     m2 = np.zeros((G.number_of_nodes(), G.number_of_nodes()))
 
-    print("non-existing edges", non_existing_edges)
+    #print("non-existing edges", non_existing_edges)
 
-    for n in G.nodes:
-        print(nx.is_isolate(G,n))
+    #for n in G.nodes:
+    #    print(nx.is_isolate(G,n))
 
     for edge in non_existing_edges:
         neighbors_of_x = list(nx.neighbors(G, edge[0]))

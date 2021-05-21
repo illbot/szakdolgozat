@@ -13,6 +13,7 @@ import time
 from multiprocessing.managers import SharedMemoryManager
 import json
 import missing_link_prediction as mlp
+import main
 
 
 def calculate_AUC(deleted_edges, non_existent_edges):
@@ -200,7 +201,9 @@ def attribute_approx(G, alpha=0.5, v1_method=nx.degree_centrality, v2_method=nx.
     print(v1)
     print(v2)
 
-    print(math.sqrt((belso_szorzat(v1,v2,alpha) - attributum) ** 2))
+    #centralitási értékek szozatával köözelítjük a gráf attribútumot.
+
+    print(math.sqrt((belso_szorzat(v1,v2,alpha) - attributum) ** 2)) # RMSE
 
 
 
@@ -224,21 +227,26 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None, type=fg.compute_fairness_good
     Available_edges = list(G.edges.data('weight', default=1))# get all edges with weights
     Deleted_edges = []  # deleted edges
 
+    Not_Available_edges = list(nx.complement(G).edges.data('weight', default=0))
+
     rmse = []
 
     temp_rmse = []
     non_existent_edges_list = []
     updated_deleted_edges_list = []
     for i in range(25):
+        print("p: " + str(p) + " alpha: " + str(alpha))
         G2 = G.copy()
         updated_deleted_edges = []
         non_existent_edges = []
 
-        Deleted_edges = random.sample(Available_edges, k=int(p * G2.number_of_edges()))# saving the random edges
+        k = int(p * G2.number_of_edges())
+
+        Deleted_edges = random.sample(Available_edges, k=k)# saving the random edges
 
         non_existing_edges = None
         if not type == fg.compute_fairness_goodness:
-            non_existing_edges = list(nx.complement(G2).edges.data('weight', default=0))
+            non_existing_edges = random.sample(Not_Available_edges, k=50)
 
         G2.remove_edges_from(Deleted_edges)  # delete the edges
         # Innen jön a specifikus rész
@@ -247,7 +255,7 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None, type=fg.compute_fairness_good
         #nx.draw_circular(G2)
         #plt.show()
 
-        print(v1, v2)
+        #print(v1, v2)
         for edge in Deleted_edges:  # all deleted edges for fairness goodness
             _from = edge[0]
             _to = edge[1]
@@ -257,11 +265,11 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None, type=fg.compute_fairness_good
                     edge = (*edge, (fairness_goodness_non_convex(a1=v1[_from], a2=v2[_to], alpha=alpha)))  # (from, to, old_weight, new_weight
                     updated_deleted_edges.append(edge)
                 else:
-                    print(v1)
-                    print(v2)
+                    #print(v1)
+                    #print(v2)
                     edge = (*edge, (fairness_goodness_non_convex(a1=v1[_from, _to], a2=v2[_from, _to], alpha=alpha)))  # (from, to, old_weight, new_weight
                     updated_deleted_edges.append(edge)
-                    print("updated deleted edges:", updated_deleted_edges)
+                    #print("updated deleted edges:", updated_deleted_edges)
 
             else:
                 if type == fg.compute_fairness_goodness:
@@ -277,11 +285,11 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None, type=fg.compute_fairness_good
                 _to = edge[1]
             # edge = (*edge, ((np.sign(fairness[_from])*(abs(fairness[_from])**alpha))*(np.sign(goodness[_to])*(abs(goodness[_to])**(1-alpha))))) # (from, to, old_weight, new_weight)
                 if not convex:
-                    print(v1)
-                    print(v2)
+                    #print(v1)
+                    #print(v2)
                     edge = (*edge, (fairness_goodness_non_convex(a1=v1[_from, _to], a2=v2[_from, _to], alpha=alpha)))  # (from, to, old_weight, new_weight
                     non_existent_edges.append(edge)
-                    print("updated deleted edges:", updated_deleted_edges)
+                    #print("updated deleted edges:", updated_deleted_edges)
 
                 else:
                     edge = (*edge,(alpha * v1[_from] + (1-alpha) * v2[_to]))
@@ -299,9 +307,37 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None, type=fg.compute_fairness_good
 
     print(rmse)"""
 
+    if L is not None:
+        if type == fg.compute_fairness_goodness:
+            rmse, pearson = main.calculate_errors(updated_deleted_edges_list, non_existent_edges_list,
+                                  treshold=G.number_of_nodes() * 0.15, type="fairness goodness")
+
+            result = {
+                'rmse': rmse,
+                'alpha': alpha,
+                'p':p,
+                'pearson':pearson
+            }
+
+            L.append(result)
+
+        else:
+            rmse, auc = main.calculate_errors(updated_deleted_edges_list, non_existent_edges_list,
+                                  treshold=G.number_of_nodes() * 0.15, type="")
+
+            result = {
+                'rmse': rmse,
+                'alpha': alpha,
+                'p': p,
+                'auc': auc
+            }
+
+            L.append(result)
+
+
     return updated_deleted_edges_list, non_existent_edges_list
 
-def draw_plots(G, process_number = 4):
+def run_paralell_lp(G, func, process_number = 4):
     alpha_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     p_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     rmse = {
@@ -315,13 +351,38 @@ def draw_plots(G, process_number = 4):
         0.8: {},
         0.9: {},
     }
+
+    auc = {
+        0.1: {},
+        0.2: {},
+        0.3: {},
+        0.4: {},
+        0.5: {},
+        0.6: {},
+        0.7: {},
+        0.8: {},
+        0.9: {},
+    }
+
+    pearson = {
+        0.1: {},
+        0.2: {},
+        0.3: {},
+        0.4: {},
+        0.5: {},
+        0.6: {},
+        0.7: {},
+        0.8: {},
+        0.9: {},
+    }
+
     with multiprocessing.Manager() as manager: # start parralell processes
         L = manager.list() # list to save the Process results
         processes = []
         pool = multiprocessing.Pool(processes=process_number)
         for alpha_value in alpha_v:
             for p_value in p_v:
-                result = pool.apply_async(lp_constant_p, [G,p_value,alpha_value, L, mlp.missing_link_algorithm])
+                result = pool.apply_async(lp_constant_p, [G, p_value, alpha_value, L, func])
                 # p.start() # start each process
                 # processes.append(p)
                 print(result)
@@ -333,10 +394,22 @@ def draw_plots(G, process_number = 4):
         for i in L:
             tmp = i
             print(tmp)
-            rmse[tmp['alpha']][tmp['p']] = tmp['rmse'][0]
+            rmse[tmp['alpha']][tmp['p']] = tmp['rmse']
+            try:
+                auc[tmp['alpha']][tmp['p']] = tmp['auc']
+            except:
+                pass
+
+            try:
+                pearson[tmp['alpha']][tmp['p']] = tmp['pearson']
+            except:
+                pass
+
         print(rmse)
+        print(auc)
+        print(pearson)
         
-        return rmse
+        return rmse, auc, pearson
 
 
 def plotting(file):
@@ -369,7 +442,10 @@ def plotting(file):
 
     alpha_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     p_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    fig, axs = plt.subplots(3, 3, sharex=True, sharey=True )
+    fig, axs = plt.plots(3, 3, sharex=True, sharey=True )
+
+
+
     #fig = plt.figure()
     #gs = fig.add_gridspec(3, 3, hspace=5)
     #axs = gs.subplots(sharex=True, sharey=True)

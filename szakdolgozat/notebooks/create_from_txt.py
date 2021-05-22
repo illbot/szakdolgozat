@@ -37,7 +37,9 @@ def otc(url):
         G.add_node(row['source'].item())
 
     for index, row in data.iterrows():
-        G.add_edge(row['source'].item(), row['target'].item(), weight=float(row['rating'].item()))
+        print(float(row['rating'].item()/10))
+        G.add_edge(row['source'].item(), row['target'].item(), weight=float(row['rating'].item()/10))
+
     return G
 
 

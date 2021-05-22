@@ -54,9 +54,9 @@ def pearson_correlation(deleted_edges, treshold, resultType):
         element_3.append(edge[2])
         element_4.append(edge[3])
 
-    print("element3: ", np.array(element_3))
-    print("element4: ", np.array(element_4))
-    print("pearson:", np.corrcoef(np.array(element_3), np.array(element_4)))
+    #print("element3: ", np.array(element_3))
+    #print("element4: ", np.array(element_4))
+    #print("pearson:", np.corrcoef(np.array(element_3), np.array(element_4)))
     return np.corrcoef(np.array(element_3), np.array(element_4))[0][1]
 
 
@@ -118,7 +118,7 @@ def lp(G, alpha=None):
         if alpha < 0 and alpha > 1:
             raise Exception("alpha parameter needs to be between 0 and 1")
 
-    XPERCENT = math.floor(G.size() * p)  # p percent of the edges
+    #XPERCENT = math.floor(G.size() * p)  # p percent of the edges
     Available_edges = list(G.edges.data('weight', default=0))  # get all edges with weights
     Deleted_edges = []  # deleted edges
 
@@ -142,17 +142,19 @@ def lp(G, alpha=None):
 
     p_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     rmse = []
-
+    pearson=[]
     for p in p_values:
         temp_rmse = []
+        temp_pearson = []
         for i in range(25):
+            print("p: "+ str(p) + " alpha: "+str(alpha))
             G2 = G.copy()
             updated_deleted_edges = []
 
             Deleted_edges = random.sample(Available_edges, k=int(p * G2.number_of_edges()))  # saving the random edges
             G2.remove_edges_from(Deleted_edges)  # delete the edges
 
-            fairness, goodness = fg.compute_fairness_goodness(G2)
+            fairness, goodness = fg.compute_fairness_goodness(G2, [],[])
             if alpha is None:  # If this method called without alpha param.
                 for edge in Deleted_edges:  # all deleted edges for fairness goodness
                     _from = edge[0]
@@ -170,11 +172,13 @@ def lp(G, alpha=None):
                             goodness[_to] ** (1 - alpha)))))  # (from, to, old_weight, new_weight
                     updated_deleted_edges.append(edge)
 
-            temp_rmse.append(calculate_error(updated_deleted_edges, "RMSE"))
+            temp_rmse.append(calculate_error(updated_deleted_edges, Type="RMSE", treshold=1, resultType=""))
+            temp_pearson.append(pearson_correlation(updated_deleted_edges, 1, ""))
         rmse.append(avg(temp_rmse))
+        pearson.append(avg(temp_pearson))
 
     print(rmse)
-    return rmse
+    return rmse, pearson
 
 que = []
 
@@ -192,18 +196,74 @@ def belso_szorzat( a1, a2, alpha):
     return np.array(a1)**alpha @ (np.array(a2)**(1-alpha)).T
 
 
+def run_paralell_attribute_approx(G, v1_func=nx.degree_centrality, v2_func=nx.closeness_centrality, attr_func=nx.diameter, process_number=4):
+    alpha_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    rmse = {
+        0.1: {},
+        0.2: {},
+        0.3: {},
+        0.4: {},
+        0.5: {},
+        0.6: {},
+        0.7: {},
+        0.8: {},
+        0.9: {},
+    }
+
+    with multiprocessing.Manager() as manager:  # start parralell processes
+        L = manager.list()  # list to save the Process results
+        processes = []
+        pool = multiprocessing.Pool(processes=process_number)
+        for alpha_value in alpha_v:
+            result = pool.apply_async(attribute_approx, [G, alpha_value, v1_func, v2_func, attr_func, L])
+            # p.start() # start each process
+            # processes.append(p)
+            print(result)
+        pool.close()
+        pool.join()
+        for p in processes:
+            p.join()  # wait for all process to be terminated
+        print(L)
+        for i in L:
+            tmp = i
+            print(tmp)
+            rmse[tmp['alpha']] = tmp['rmse']
+
+        print(rmse)
+
+        return rmse
+
+
 def attribute_approx(G, alpha=0.5, v1_method=nx.degree_centrality, v2_method=nx.closeness_centrality,
-                     attributum_method=nx.diameter, L=[] ):
+                     attributum_method=nx.diameter, L=None ):
     v1 = list(v1_method(G).values())
     v2 = list(v2_method(G).values())
+
+    #print("v1_values:",v1_method(G).values())
+    #print("v2_values:",v2_method(G).values())
     attributum = attributum_method(G)
 
-    print(v1)
-    print(v2)
+    #print(v1)
+    #print(v2)
 
-    #centralitási értékek szozatával köözelítjük a gráf attribútumot.
+    print(attributum)
 
-    print(math.sqrt((belso_szorzat(v1,v2,alpha) - attributum) ** 2)) # RMSE
+    if attributum_method is nx.triangles:
+        attributum = list(attributum.values())
+
+    print(attributum)
+    #centralitási értékek szozatával közelítjük a gráf attribútumot.
+    rmse = math.sqrt((belso_szorzat(v1, v2, alpha) - attributum) ** 2)
+
+    if L is not None:
+        L.append({
+            'alpha': alpha,
+            'rmse': rmse
+        })
+
+    print(rmse)# RMSE
+    return rmse
+
 
 
 
@@ -337,7 +397,7 @@ def lp_constant_p( G, p=0.1, alpha=None, L = None, type=fg.compute_fairness_good
 
     return updated_deleted_edges_list, non_existent_edges_list
 
-def run_paralell_lp(G, func, process_number = 4):
+def run_paralell_lp(G, func, process_number = 4, convex=False):
     alpha_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     p_v = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     rmse = {
@@ -382,7 +442,7 @@ def run_paralell_lp(G, func, process_number = 4):
         pool = multiprocessing.Pool(processes=process_number)
         for alpha_value in alpha_v:
             for p_value in p_v:
-                result = pool.apply_async(lp_constant_p, [G, p_value, alpha_value, L, func])
+                result = pool.apply_async(lp_constant_p, [G, p_value, alpha_value, L, func, convex])
                 # p.start() # start each process
                 # processes.append(p)
                 print(result)

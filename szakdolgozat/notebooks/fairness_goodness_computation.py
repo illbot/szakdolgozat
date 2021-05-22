@@ -33,10 +33,10 @@ def compute_fairness_goodness(G,deleted_edges,non_existing_edges):
         df = 0
         dg = 0
 
-        print('-----------------')
-        print("Iteration number", iter)
+        #print('-----------------')
+        #print("Iteration number", iter)
         
-        print('Updating goodness')
+        #print('Updating goodness')
         for node in nodes:
             inedges = G.in_edges(node, data='weight')
             g = 0
@@ -49,7 +49,7 @@ def compute_fairness_goodness(G,deleted_edges,non_existing_edges):
             except:
                 pass
 
-        print('Updating fairness')
+        #print('Updating fairness')
         for node in nodes:
             outedges = G.out_edges(node, data='weight')
             f = 0
